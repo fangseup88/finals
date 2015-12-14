@@ -1,0 +1,321 @@
+---
+title: "Finals"
+author: "Edwige"
+date: "December 13, 2015"
+output:
+  html_document:
+    fig_caption: yes
+    toc: yes
+    toc_depth: 5
+---
+
+```{r include=FALSE, cache=FALSE}
+# DO NOT REMOVE
+# THIS IS FOR SETTING SOME PLOTTING PARAMETERS SO THAT YOUR PLOTS DON'T TAKE UP TOO MUCH SPACE
+# IF YOU WOULD LIKE TO CHANGE THESE, SEE HELP FILES ON THE par() FUNCTION
+# OR ASK FOR HELP
+library(knitr)
+## set global chunk options
+opts_chunk$set(fig.path='figure/manual-', cache.path='cache/manual-', fig.align='center', fig.show='hold', par=TRUE)
+## tune details of base graphics (http://yihui.name/knitr/hooks)
+knit_hooks$set(par=function(before, options, envir){
+if (before && options$fig.show!='none') par(mar=c(4,4,.2,.1),cex.lab=.95,cex.axis=.9,mgp=c(2,.7,0),tcl=-.3)
+})
+```
+
+### Introduction
+
+In this project we are interested in Obesity and health risk factors associated to it, which are huge. Knowing that obesity is not all about aesthetics and given all the tools and techniques we have learned in class, we will like to learn more about that topic. Our objective is to understand avaiable facts and data relevant to the topic. BMI (body mass index), Cholesterol, and hypertension are some of the variables used in risk factors datasets. We will spent some time exploring the correlations between those variables and see for example if BMI is a good predictor of hypertension and hyperlipidia. Our analysis will be based on tree differents data sources.
+
+### Data Sources
+
+1. World Health Organisation, WHO - Health Risk factors
+2. Center for Disease control and Prevention, CDC - NHANES dataset 
+3. Social Media data 
+
+### Loading Packages
+```{r }
+library(NHANES)
+library(RWeka)
+library(party)
+library(partykit)
+library(tm)
+library(SnowballC)  
+library(stringr)
+library(RTextTools)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+```
+### Some Functions
+```{r }
+#The following function will take care of the rows with NAs
+delete.na <- function(dframe, n=0) {
+  part <- apply(dframe, 2, is.na)
+  partindex <- apply(part, 1, function(x) sum(x) <= n)
+  dframe[partindex, ]
+}
+#The function below will be used for social media text mining
+preprocessing <- function(tweets, nbgrams)
+{
+
+#Creating the coupus from the directory files
+the_corpus <- Corpus(VectorSource(tweets))
+
+#Removing  punctuation
+the_corpus <- tm_map(the_corpus, removePunctuation) 
+
+#Removing numbers
+the_corpus <- tm_map(the_corpus, removeNumbers)
+the_corpus <- tm_map(the_corpus, stemDocument) 
+
+#Removing  words that usually have no analytic value
+the_corpus <- tm_map(the_corpus, removeWords, stopwords("english")) 
+
+#Removing  white spaces
+the_corpus <- tm_map(the_corpus, stripWhitespace) 
+the_corpus <- tm_map(the_corpus, content_transformer(tolower))
+the_corpus <- tm_map(the_corpus, PlainTextDocument)
+
+options(mc.cores=1) 
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = nbgrams, max = nbgrams)) # create n-grams using RWEKA
+tdm <- TermDocumentMatrix(the_corpus, control = list(tokenize = BigramTokenizer,  weighting = weightTf)) # create tdm from n-grams
+tdm
+}
+
+```
+
+
+### Obesity in the world (data from WHO)
+
+We spent some time trying to figure out how to do the download process automatically but it did not work. We tried two different packages: gdata and httr without success.
+
+#### Downloading pre-treated CSV files from GitHub. 
+
+The data initially was manually downloaded from Gapminder **http://www.gapminder.org/data/**
+
+```{r }
+setwd("c:/data/is607")
+
+fileUrl1 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_BMIfemale.csv"
+fileUrl2 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_BMImale.csv"
+fileUrl3 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_SBPfemale.csv"
+fileUrl4 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_SBPmale.csv"
+fileUrl5 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_TCfemale.csv"
+fileUrl6 <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/Indicator_TCmale.csv"
+
+download.file(fileUrl1, destfile="Indicator_BMIfemale.csv", mode="wb")
+download.file(fileUrl2, destfile="Indicator_BMImale.csv", mode="wb")
+download.file(fileUrl3, destfile="Indicator_SBPfemale.csv", mode="wb")
+download.file(fileUrl4, destfile="Indicator_SBPmale.csv", mode="wb")
+download.file(fileUrl5, destfile="Indicator_TCfemale.csv", mode="wb")
+download.file(fileUrl6, destfile="Indicator_TCmale.csv", mode="wb")
+
+BMIdataMale = read.csv("Indicator_BMImale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+BMIdataFemale = read.csv("Indicator_BMIfemale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+BPdataMale=read.csv("Indicator_SBPmale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+BPdataFemale=read.csv("Indicator_SBPfemale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+CHOLdataMale=read.csv("Indicator_TCmale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+CHOLdataFemale=read.csv("Indicator_TCfemale.csv", header=TRUE, check.names = FALSE, stringsAsFactors=F)
+
+#Transforming the data from wide format to long format
+bmiM <- BMIdataMale  %>% gather("Year","BMI", 2:30) %>% group_by(Year)
+bmiF <- BMIdataFemale  %>% gather("Year","BMI", 2:30) %>% group_by(Year)
+bpM <- BPdataMale  %>% gather("Year","BP", 2:30)%>% group_by(Year)
+bpF <- BPdataFemale  %>% gather("Year","BP", 2:30)%>% group_by(Year)
+cholM <- CHOLdataMale  %>% gather("Year","CHOL", 2:30)%>% group_by(Year)
+cholF <- CHOLdataFemale  %>% gather("Year","CHOL", 2:30)%>% group_by(Year)
+
+#Merging the data and adding Gender information
+females_init <- merge(bmiF, bpF, by=c("Year", "Country"))
+females <- merge(females_init, cholF, by=c("Year", "Country"))
+head(females)
+females$Gender <- 'F'
+str(females)
+females$Gender <- as.factor(females$Gender)
+
+males_init <- merge(bmiM, bpM, by=c("Year", "Country"))
+males <- merge(males_init, cholM, by=c("Year", "Country"))
+head(males)
+males$Gender <- 'M'
+str(males)
+males$Gender <- as.factor(males$Gender)
+
+allData<-rbind(males, females)
+
+str(allData)
+```
+
+#### Missing Data
+```{r}
+# Remove any empty rows
+allData<-allData[!is.na(allData$BMI),] 
+
+allData<-allData[!is.na(allData$Country),] 
+```
+```{r }
+library(psych)
+
+describe(allData)
+
+str(allData)
+```
+
+#### Adding BMI and Blood Pressure classes to the data
+
+```{r }
+allData$bmiClass <- cut(allData$BMI, breaks = c(0,18.5,25,30,50), labels = c('Underweight', 'Healthy', 'Overweight', 'Obese'))
+
+allData$bpClass <- cut(allData$BP, breaks = c(0,110,120,140,160), labels = c('Normal', 'Pre-HBP', 'Stage1', 'Stage2'))
+
+```
+
+#### Graphical representations for BMI and Blood Pressure
+```{r }
+
+ggplot(aes(x = Year, y = BMI, color = bmiClass, pch = Gender), 
+       data = allData) +
+  geom_jitter(alpha = 1) +
+  scale_x_discrete(breaks = seq(1980,2008,2)) +
+  scale_colour_brewer(palette=1) +  xlab("Years") +  ylab("Mean Body Mass Index") + ggtitle('Body Mass Index Evolution in the World Per Year\n')
+
+```
+
+It is showing that the BMI is going up.
+
+```{r }
+ggplot(aes(x = Year, y = BP, color = bpClass, pch = Gender), 
+       data = allData) +
+  geom_jitter(alpha = 1) +
+  scale_x_discrete(breaks = seq(1980,2008,2)) +
+  scale_colour_brewer(palette=3) +  xlab("Years") +  ylab("Mean Blood Pressure") + ggtitle('Blood Pressure Evolution in the World Per Year\n')
+```
+
+The blood pressure went down slightly and stayed almost at the same level.
+
+```{r }
+pairs.panels(allData)
+
+```
+
+#### Looking for correlations in the data with Parallel Coordinates Plots
+
+```{r }
+
+ggparcoord(data=allData, columns = c("BMI", "CHOL", "BP"), groupColumn = "bpClass", order = "allClass", scale="uniminmax")
+
+ggparcoord(data=allData, columns = c("BMI", "CHOL", "BP"), groupColumn = "bmiClass", order = "allClass", scale="uniminmax")
+```
+
+### Analysing Data from CDC
+```{r }
+library(survey)
+library(NHANES)
+data(NHANESraw)
+
+#Subsetting the initial dataset
+subnhanes <- subset(NHANESraw, select=c(SDMVPSU, SDMVSTRA, Gender, Age, Weight, Height, BMI, Diabetes, BPSysAve, BPDiaAve, DirectChol, TotChol))
+
+#Creating a factor variable for BMI classification
+subnhanes$bmiClass <- cut(subnhanes$BMI, breaks = c(0,18.5,25,30,50), labels = c('Underweight', 'Healthy', 'Overweight', 'Obese'))
+
+#Creating a factor variable for Blood Pressure classification based on two variables
+subnhanes$bpClass <- ifelse((subnhanes$BPSysAve>=160 & subnhanes$BPDiaAve>=100),"Stage 2 HBP",ifelse((subnhanes$BPSysAve>=140 & subnhanes$BPDiaAve>=90),"Stage 1 HBP",ifelse((subnhanes$BPSysAve>=120 & subnhanes$BPDiaAve>=80),"Pre-HBP","Normal HBP")))
+names(subnhanes)
+subnhanes$bpClass <-as.factor(subnhanes$bpClass)
+
+#Taking care of missing values
+dim(subnhanes)
+subnhanes<-delete.na(subnhanes)
+dim(subnhanes)
+
+#Survey Design
+bmi_design <- svydesign(id = ~ SDMVPSU, strata = ~ SDMVSTRA, nest = TRUE, weight = ~ BMI, data = subnhanes)
+
+chol_design<- svydesign(id = ~ SDMVPSU, strata = ~ SDMVSTRA, nest = TRUE, weight = ~ TotChol, data = subnhanes)
+
+bmi_design
+chol_design
+
+#Predicting the probability of being diagnosed with hypertension based on age,bmi Diabetes, Weight
+m1<-svyglm(bpClass~Age+bmiClass+Weight+TotChol+Diabetes, design=bmi_design, family=quasibinomial)
+
+#Is BMI a good predictor of hypertension and hyperlipidemia?
+m2<-svyglm(bmiClass~Age+TotChol+bpClass+Weight+Diabetes, design=bmi_design, family=quasibinomial)
+summary(m1)
+summary(m2)
+
+library(party)
+library(partykit)
+if(require("party", quietly = TRUE)) plot(m1)
+
+if(require("party", quietly = TRUE)) plot(m2)
+```
+
+
+According to our multivariate logistic regression analysis, the BMI seems to be significantly associated with blood pressure and the Cholesterol level.
+
+ 
+
+### Data from Social Media (Twitter)
+
+We used a script for data scraping from Twitter API. We performed some preprocesing and created a text file named fromTwitter.txt. That text file can be downloaaded from GitHub.
+We searched Twitter for: obesity,overweight, body mass index, body fat, anti-obesity drug, appetite, weight control, abdominal obesity.
+
+```{r }
+setwd("c:/data/is607")
+
+fileUrl <- "https://raw.githubusercontent.com/fangseup88/finals/master/data_finals/fromTwitter.txt"
+
+download.file(fileUrl, destfile="fromTwitter.txt", mode="wb")
+
+data = read.csv("fromTwitter.txt", header=FALSE, check.names = FALSE, stringsAsFactors=F)
+
+head(data)
+
+tdm <- preprocessing(data, 2)
+
+tdm <- removeSparseTerms(tdm, 0.75)
+
+tdm1 <- as.matrix (tdm)
+freq <- colSums(tdm1)
+
+freq <- sort(freq, decreasing = TRUE)
+words <-names(freq)
+library(wordcloud)
+
+# Create a WordCloud to Visualize the Text Data ---------------------------
+m = as.matrix(tdm)
+v = sort(rowSums(m),decreasing=TRUE)
+d = data.frame(word = names(v),freq=v)
+# Create the word cloud
+pal = brewer.pal(9,"BuPu")
+#wordcloud(words = d$word, freq = d$freq, scale = c(3,.8), random.order = F,           colors = pal)
+
+#library(topicmodels)
+#rowTotals <- apply(tdm , 1, sum) 
+#tdm.new   <- tdm[rowTotals> 0, ]
+#g = LDA(tdm.new,10,method = 'VEM',control=NULL,model=NULL)
+
+```
+
+#### Exploring the Document Term Matrix
+
+```{r }
+tdm.matrix <- as.matrix(tdm)
+
+topwords <- rowSums(tdm.matrix)
+topwords <- as.numeric(topwords)
+hist(topwords, breaks = 10)
+
+findFreqTerms(tdm, lowfreq = 500) # find terms with a frequency higher than 1000
+
+head(sort(topwords, decreasing = TRUE))
+
+```
+
+### Conclusion 
+
+There was a significant relationship between the BMI, hypertension and high cholesterol. Finding data for this project was a little bit hard.
+My plan is to use the same approach (automatic data collection) for discovering how to deal with obesity in term of weight loss.
